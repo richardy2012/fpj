@@ -15,6 +15,8 @@ import java.util.concurrent.Callable;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Future;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 
 public class Functional {
 
@@ -222,51 +224,128 @@ public class Functional {
         return Functional.parMap(f, ac, bc, processes, executorService);
     }
 
+    private static class ParProcessor<A,B> implements Runnable {
+
+        // state: 0 - waiting for data, 1 - processing, 2 - processed, 3 - exit
+        private AtomicInteger state = new AtomicInteger(0);
+        private Function<A,B> function;
+        private A a = null;
+        private B b = null;
+
+        private ParProcessor(Function<A,B> function){
+            this.function = function;
+        }
+
+        public boolean process(final A a){
+            if(state.compareAndSet(0,1)){
+                this.a = a;
+                return true;
+            }else{
+                return false;
+            }
+        }
+
+        public B get(){
+            if(state.compareAndSet(2,0)){
+                B b = this.b;
+                return b;
+            }else{
+                return null;
+            }
+        }
+
+        public B waitAndGet(){
+            while(state.get() == 1){
+                try {
+                    Thread.sleep(10);
+                }catch(InterruptedException ex){
+                }
+            }
+            return get();
+        }
+
+        public void shutdown(){
+            while(!state.compareAndSet(0,3)){
+                try {
+                    Thread.sleep(10);
+                }catch(InterruptedException ex){
+                }
+            }
+        }
+
+        public void run(){
+            while(true){
+                int stateValue = state.get();
+                if(stateValue == 1){
+                    this.b = this.function.apply(this.a);
+                    state.set(2);
+                }else if(stateValue == 3){
+                    break;
+                }else{
+                    try {
+                        Thread.sleep(10);
+                    }catch(InterruptedException ex){
+                    }
+                }
+            }
+        }
+
+    }
+
+
     public static <A,B> Collection<B> parMap(final Function<A,B> f, final Collection<A> ac, final Collection<B> bc, final int processes, final ExecutorService executorService){
         if(ac.size() == 0)
             return bc;
 
-        final int size = ac.size();
-        final int interval = size/processes;
-
-        List<Future<List<B>>> futures = new ArrayList<Future<List<B>>>(processes);
+        List<ParProcessor<A,B>> processors = new ArrayList<ParProcessor<A,B>>(processes);
         for(int i = 0; i < processes; i++){
-            final int processId = i;
-            futures.add(executorService.submit(new Callable<List<B>>(){
-                public List<B> call(){
-                    List<B> result = new ArrayList<B>(interval+(processes-1));
-                    int j = 0;
-                    for(A a : ac){
-                        if((j % processes) == processId)
-                            result.add(f.apply(a));
-                        j++;
+            ParProcessor<A,B> p = new ParProcessor<A,B>(f);
+            processors.add(p);
+            executorService.submit(p);
+        }
+
+        ListIterator<ParProcessor<A,B>> pi = processors.listIterator();
+
+        ParProcessor<A,B> p = null;
+        B b = null;
+        boolean processed;
+        for(A a : ac){
+            processed = false;
+            while(!processed){
+                while(pi.hasNext()){
+                    p = pi.next();
+                    b = p.get();  
+                    if(b != null)
+                        bc.add(b);
+                    if(p.process(a)){
+                        processed = true;
+                        break;
                     }
-                    return result;
                 }
-            }));
-        }
-
-        // Wait for all futures
-        List<Iterator<B>> iterators = new ArrayList<Iterator<B>>(processes);
-        for(Future<List<B>> future : futures){
-            try {
-                iterators.add(future.get().iterator());
-            }catch(Exception ex){
-                ex.printStackTrace();
-            }
-        }
-
-        // Populate results from various lists according to order of elements
-        while(true){
-            boolean allEmpty = true;
-            for(Iterator<B> it : iterators){
-                if(it.hasNext()){
-                    bc.add(it.next());            
-                    allEmpty = false;
+                while(pi.hasPrevious()){
+                    p = pi.previous();
+                    b = p.get();  
+                    if(b != null)
+                        bc.add(b);
+                    if(p.process(a)){
+                        processed = true;
+                        break;
+                    }
+                }
+                try {
+                    Thread.sleep(10);
+                }catch(InterruptedException ex){
                 }
             }
-            if(allEmpty)
-                break;
+        }
+
+        pi = processors.listIterator();
+        while(pi.hasNext()){
+            p = pi.next();
+            b = p.waitAndGet();  
+            if(b != null)
+                bc.add(b);
+            p.shutdown();
         }
 
         return bc;
