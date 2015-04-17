@@ -292,7 +292,6 @@ public class Functional {
 
     }
 
-
     public static <A,B> Collection<B> parMap(final Function<A,B> f, final Collection<A> ac, final Collection<B> bc, final int processes, final ExecutorService executorService){
         if(ac.size() == 0)
             return bc;
@@ -309,17 +308,15 @@ public class Functional {
         ParProcessor<A,B> p = null;
         B b = null;
         boolean processed;
-        for(A a : ac){
-            processed = false;
-            while(!processed){
+acLoop: for(A a : ac){
+            while(true){
                 while(pi.hasNext()){
                     p = pi.next();
                     b = p.get();  
                     if(b != null)
                         bc.add(b);
                     if(p.process(a)){
-                        processed = true;
-                        break;
+                        continue acLoop;
                     }
                 }
                 while(pi.hasPrevious()){
@@ -328,8 +325,7 @@ public class Functional {
                     if(b != null)
                         bc.add(b);
                     if(p.process(a)){
-                        processed = true;
-                        break;
+                        continue acLoop;
                     }
                 }
                 try {
