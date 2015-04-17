@@ -307,7 +307,6 @@ public class Functional {
 
         ParProcessor<A,B> p = null;
         B b = null;
-        boolean processed;
 acLoop: for(A a : ac){
             while(true){
                 while(pi.hasNext()){
