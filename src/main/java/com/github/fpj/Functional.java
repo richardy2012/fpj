@@ -101,6 +101,18 @@ public class Functional {
         };
     }
 
+    public static <A,B> Function<A,Future<B>> parApply(final Function<A,B> f){
+        return new Function<A,Future<B>>(){
+            public Future<B> apply(final A a){
+                return executorService.submit(new Callable<B>(){
+                    public B call(){
+                        return f.apply(a);
+                    }
+                });
+            }
+        };
+    }
+
     public static <A,B> B apply(final Function<A,B> f, final A a){
         return f.apply(a);
     }
